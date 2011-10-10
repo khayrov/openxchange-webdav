@@ -106,7 +106,11 @@ class OXConnection(object):
             oid_element = prop_element.getElementsByTagNameNS(OX_XMLNS, 'object_id')[0]
 
             if element_text(module_element) == 'contact':
-                result.append(element_text(oid_element))
+                title_element = prop_element.getElementsByTagNameNS(
+                    OX_XMLNS, 'title')[0]
+                oid = element_text(oid_element)
+                title = element_text(title_element)
+                result.append((oid, title))
 
         return result
 
@@ -148,7 +152,7 @@ def vcard_ref(props):
 
 vcard_props_mapping = {
     'FN' : 'displayname',
-    'N' : lambda(props): '%s;%s;%s;%s;%s' % (props['last_name'].strip(),
+    'N' : lambda(props): '%s;%s;%s;%s;%s' % (props.get('last_name', '').strip(),
         props.get('first_name', '').strip(), props.get('second_name', '').strip(),
         props.get('title', ''), props.get('suffix', '')),
     'EMAIL;TYPE="work"' : 'email1',
@@ -218,7 +222,8 @@ def init_options():
     parser.add_option('-p', '--password', metavar='PASS',
         help='password')
     parser.add_option('-o', '--output', metavar='FILE',
-        help='resulting vCard file name (standard output by default)')
+        help='resulting vCard file name ("-" means standard output)\n' + \
+            'by default each contacts folder is written to a separate file')
 
     (options, args) = parser.parse_args()
 
@@ -243,9 +248,9 @@ def main():
     conn = None
     out_fd = None
 
-    if not output_filename or output_filename == '-':
+    if output_filename == '-':
         out_fd = sys.stdout
-    else:
+    elif output_filename:
         out_fd = open(output_filename, 'wb')
 
     conn = None
@@ -253,11 +258,20 @@ def main():
         conn = OXConnection()
         folders = conn.list_contact_folders()
 
-        for folder in folders:
-            contacts_data = conn.get_contact_folder_contents(folder)
-            for contact in contacts_data:
-                vcard = make_vcard(contact)
-                out_fd.write(vcard.encode('utf-8'))
+        for folder_id, title in folders:
+            folder_fd = None
+            if not out_fd:
+                folder_fd = open(title.replace('/', '_') + '.vcf', 'wb')
+
+            contacts_data = conn.get_contact_folder_contents(folder_id)
+
+            try:
+                for contact in contacts_data:
+                    vcard = make_vcard(contact)
+                    (out_fd or folder_fd).write(vcard.encode('utf-8'))
+            finally:
+                if folder_fd:
+                    folder_fd.close()
 
     finally:
         if conn:
